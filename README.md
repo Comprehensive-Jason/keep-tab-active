@@ -22,13 +22,15 @@ Memory Saver unloads background tabs to save memory. That is fine until it unloa
 | Permission | Why |
 |---|---|
 | `contextMenus` | The right-click items. |
-| `scripting`, `<all_urls>` | Swapping the favicon for the marked one, including on background tabs and after a protected tab reloads. |
+| `activeTab`, `scripting` | Swapping the favicon for the marked one on the tab you are viewing when you protect it. |
 | `favicon` | Reading the browser's cached favicon to draw the badge on. |
+| `<all_urls>` (optional, off by default) | Turned on from the extension's options page. Lets the favicon pin also appear on background tabs protected from the tab strip, and come back after a protected tab reloads. |
 
-The extension makes no network requests and stores nothing; the protection lives on the tab itself.
+The protection itself needs none of these; only the favicon pin does. The extension makes no network requests and stores nothing; the protection lives on the tab itself. See [PRIVACY.md](PRIVACY.md).
 
 ## Limits
 
+- Without the optional all-sites access, the favicon pin appears only on the tab you are viewing when you protect it, and a full reload clears it (the tab stays protected; the toolbar badge stays correct).
 - Protection lasts until the tab closes or the browser restarts.
 - A tab that has already been discarded reloads when you open it; protect it before switching away.
 - The tab-strip menu item needs a browser version that supports the `tab` context menu; on older versions only the page menu, toolbar icon, and shortcut are available.

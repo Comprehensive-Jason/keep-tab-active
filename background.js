@@ -28,12 +28,17 @@ chrome.runtime.onInstalled.addListener(async () => {
   // ones only in Firefox), so check first, as WebScrapBook does. The title
   // can't follow the clicked tab, since Chromium has no "menu is opening"
   // event, so it stays neutral; the favicon pin shows the state there.
+  // Chrome 150 added it; the try is a second guard for builds that list the
+  // type but reject it.
   if (chrome.contextMenus.ContextType?.TAB) {
-    chrome.contextMenus.create({
-      id: TAB_MENU_ID,
-      title: "Toggle keep tab active",
-      contexts: ["tab"],
-    });
+    try {
+      chrome.contextMenus.create(
+        { id: TAB_MENU_ID, title: "Toggle keep tab active", contexts: ["tab"] },
+        () => void chrome.runtime.lastError,
+      );
+    } catch {
+      // Older browser: the page menu, toolbar icon, and shortcut still work.
+    }
   }
 });
 
@@ -44,11 +49,15 @@ async function toggle(tab) {
   const fresh = await chrome.tabs.get(tab.id);
   const keep = fresh.autoDiscardable !== false;
   await chrome.tabs.update(tab.id, { autoDiscardable: !keep });
+  // No URL means no page access (a background tab without the opt-in);
+  // the protection still applies, only the favicon pin is skipped.
+  if (keep && !fresh.url) return;
   await markTab(tab.id, keep ? fresh.url : null);
 }
 
-// Site access ("<all_urls>") lets this reach background tabs and re-mark a
-// protected tab after it reloads; activeTab alone covered only the tab in view.
+// Page access comes from activeTab by default: toggling counts as a user
+// gesture on the tab in view. The opt-in on the options page grants
+// "<all_urls>", which also reaches background tabs and survives reloads.
 async function markTab(tabId, pageUrl) {
   const href = pageUrl ? await markedFavicon(pageUrl) : null;
   chrome.scripting
@@ -154,9 +163,17 @@ chrome.commands.onCommand.addListener((command, tab) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   reflect(tab);
   // A full page load (reload, new site, or a discarded tab coming back)
-  // wipes the injected favicon, so put it back on protected tabs.
-  if (changeInfo.status === "complete" && tab.autoDiscardable === false) {
+  // wipes the injected favicon, so put it back on protected tabs. Only
+  // possible with the opt-in; without it tab.url is hidden and this skips.
+  if (changeInfo.status === "complete" && tab.autoDiscardable === false && tab.url) {
     markTab(tabId, tab.url);
+  }
+});
+
+// When the opt-in is granted, pin every tab that is already protected.
+chrome.permissions.onAdded.addListener(async () => {
+  for (const tab of await chrome.tabs.query({})) {
+    if (tab.autoDiscardable === false && tab.url) markTab(tab.id, tab.url);
   }
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => chrome.tabs.get(tabId).then(reflect));

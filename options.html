@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Keep Tab Active options</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; min-width: 360px; max-width: 520px; }
+    h1 { font-size: 16px; margin: 0 0 8px; }
+    p { margin: 8px 0; }
+    #status { font-weight: 600; }
+    button { font: inherit; padding: 6px 14px; margin-top: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Favicon pin everywhere</h1>
+  <p>Protecting a tab always works. By default the green favicon pin appears only on the tab you are viewing when you protect it, and a reload clears it.</p>
+  <p>Allowing access to all sites lets the pin appear on background tabs you protect from the tab strip and come back after reloads. The extension uses that access only to swap the favicon; it makes no network requests and stores nothing.</p>
+  <p>Status: <span id="status">checking…</span></p>
+  <button id="toggle" hidden></button>
+  <script src="options.js"></script>
+</body>
+</html>
