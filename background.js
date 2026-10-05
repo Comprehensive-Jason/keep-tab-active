@@ -44,15 +44,27 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.action.setBadgeBackgroundColor({ color: GREEN });
 
+// Tabs to protect as soon as they finish loading (see toggle).
+const pendingKeep = new Set();
+
 async function toggle(tab) {
   if (!tab || tab.id === chrome.tabs.TAB_ID_NONE) return;
   const fresh = await chrome.tabs.get(tab.id);
   const keep = fresh.autoDiscardable !== false;
-  await chrome.tabs.update(tab.id, { autoDiscardable: !keep });
-  // An already-unloaded tab has no page to pin. Protecting it means the user
-  // wants it kept, so load it now; onUpdated pins it when the load completes.
-  if (keep && fresh.discarded) {
-    await chrome.tabs.reload(tab.id).catch(() => {});
+  // Discarded by Memory Saver, or restored at startup but never loaded
+  // (status "unloaded" without the discarded flag).
+  const unloaded = fresh.discarded || fresh.status === "unloaded";
+  try {
+    await chrome.tabs.update(tab.id, { autoDiscardable: !keep });
+  } catch (e) {
+    console.warn("Keep Tab Active: could not set autoDiscardable", { status: fresh.status, discarded: fresh.discarded }, e);
+    if (!(keep && unloaded)) throw e;
+    pendingKeep.add(tab.id);
+  }
+  // An unloaded tab has no page to pin. Protecting it means the user wants
+  // it kept, so load it now; onUpdated pins it when the load completes.
+  if (keep && unloaded) {
+    await loadTab(tab.id);
     return;
   }
   // No URL means no page access (a background tab without the opt-in);
@@ -61,14 +73,37 @@ async function toggle(tab) {
   await markTab(tab.id, keep ? fresh.url : null);
 }
 
+// Reload is enough for a discarded tab; if a never-loaded restored tab is
+// still unloaded afterwards, navigate it to its own URL instead.
+async function loadTab(tabId) {
+  await chrome.tabs.reload(tabId).catch((e) => console.warn("Keep Tab Active: reload failed", e));
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const after = await chrome.tabs.get(tabId).catch(() => null);
+  if (after?.status === "unloaded" && after.url) {
+    await chrome.tabs.update(tabId, { url: after.url }).catch((e) => console.warn("Keep Tab Active: load failed", e));
+  }
+}
+
 // Page access comes from activeTab by default: toggling counts as a user
 // gesture on the tab in view. The opt-in on the options page grants
 // "<all_urls>", which also reaches background tabs and survives reloads.
+// Some sites' security policy (CSP img-src) forbids data: images, so the
+// browser keeps the old favicon. When the swap didn't take, mark the title
+// with a pin instead. A frozen background tab runs the script only once the
+// user switches to it, so this waits until then.
 async function markTab(tabId, pageUrl) {
   const href = pageUrl ? await markedFavicon(pageUrl) : null;
-  chrome.scripting
-    .executeScript({ target: { tabId }, func: setFaviconMark, args: [href] })
-    .catch(() => {}); // brave:// pages, the Web Store, and PDFs refuse scripts
+  const run = (useTitle) =>
+    chrome.scripting.executeScript({ target: { tabId }, func: setFaviconMark, args: [href, useTitle] });
+  try {
+    await run(false);
+    if (!href) return;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.autoDiscardable === false && !tab.favIconUrl?.startsWith("data:")) await run(true);
+  } catch {
+    // brave:// pages, the Web Store, and PDFs refuse scripts; closed tabs
+  }
 }
 
 // The site's favicon with a green pin badge in the corner, as a data: URL.
@@ -109,19 +144,52 @@ async function markedFavicon(pageUrl) {
 // Runs inside the page. With an href, swaps in the marked favicon and keeps
 // it there if the site rewrites its icons (YouTube does on every video).
 // With null, puts the site's own icons back.
-function setFaviconMark(href) {
-  const state = (window.__keepTabActive ??= { hidden: [] });
-  state.observer?.disconnect();
+// The site's icon links are parked in a <template> (inert, so the browser
+// ignores them) rather than renamed: browsers re-read the favicon when icon
+// links are added or removed, but can miss a rel change on a loaded page.
+// Everything lives in the page itself, so a reloaded or updated copy of the
+// extension can still undo what an earlier copy did.
+// With useTitle, leaves the icons alone and prefixes the title instead.
+function setFaviconMark(href, useTitle = false) {
+  const PIN = "📌 "; // defined here: injected functions can't see outer constants
+  // Each call stamps the page; a watcher from an older call, or from an
+  // earlier copy of the extension (its scripts linger in the page after a
+  // reload or update), stands down instead of re-adding its pin.
+  const gen = String(Math.random());
+  document.documentElement.dataset.ktaGen = gen;
+
+  if (document.title.startsWith(PIN)) document.title = document.title.slice(PIN.length);
+
   document.querySelector("link[data-keep-tab-active]")?.remove();
-  for (const link of state.hidden) link.rel = link.dataset.ktaRel;
-  state.hidden = [];
+  const parked = document.querySelector("template[data-kta-parked]");
+  if (parked) {
+    document.head.append(...parked.content.childNodes);
+    parked.remove();
+  }
+  for (const link of document.querySelectorAll('link[rel="kta-hidden-icon"]')) {
+    link.rel = link.dataset.ktaRel; // renamed by 1.6 and earlier
+  }
   if (!href) return;
 
+  let observer;
   const apply = () => {
-    for (const link of document.querySelectorAll('link[rel~="icon"]:not([data-keep-tab-active])')) {
-      link.dataset.ktaRel = link.rel;
-      link.rel = "kta-hidden-icon";
-      state.hidden.push(link);
+    if (!chrome.runtime?.id || document.documentElement.dataset.ktaGen !== gen) {
+      observer?.disconnect();
+      return;
+    }
+    if (useTitle) {
+      if (!document.title.startsWith(PIN)) document.title = PIN + document.title;
+      return;
+    }
+    const icons = document.querySelectorAll('link[rel~="icon"]:not([data-keep-tab-active])');
+    if (icons.length) {
+      let park = document.querySelector("template[data-kta-parked]");
+      if (!park) {
+        park = document.createElement("template");
+        park.dataset.ktaParked = "";
+        document.head.append(park);
+      }
+      park.content.append(...icons);
     }
     if (!document.querySelector("link[data-keep-tab-active]")) {
       const ours = document.createElement("link");
@@ -132,10 +200,11 @@ function setFaviconMark(href) {
     }
   };
   apply();
-  state.observer = new MutationObserver(apply);
-  state.observer.observe(document.head, {
+  observer = new MutationObserver(apply);
+  observer.observe(document.head, {
     childList: true,
     subtree: true,
+    characterData: true, // the site retitling itself (YouTube, chat apps)
     attributes: true,
     attributeFilter: ["rel", "href"],
   });
@@ -166,7 +235,10 @@ chrome.commands.onCommand.addListener((command, tab) => {
 
 // onUpdated fires when the flag changes and on navigation, which clears
 // per-tab badges, so re-applying here keeps the badge accurate.
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete" && pendingKeep.delete(tabId)) {
+    tab = await chrome.tabs.update(tabId, { autoDiscardable: false });
+  }
   reflect(tab);
   // A full page load (reload, new site, or a discarded tab coming back)
   // wipes the injected favicon, so put it back on protected tabs. Only
