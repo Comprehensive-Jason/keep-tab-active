@@ -31,12 +31,13 @@ The protection itself needs none of these; only the favicon pin does. The extens
 ## Limits
 
 - Without the optional all-sites access, the favicon pin appears only on the tab you are viewing when you protect it, and a full reload clears it (the tab stays protected; the toolbar badge stays correct).
-- Protection lasts until the tab closes or the browser restarts.
+- Protection lasts until the tab closes. Brave restores it with the session after a restart (other Chromium browsers may not); restored tabs get their pin when they next load.
 - Protecting a tab that has been discarded, or restored at startup but not loaded yet, loads it straight away (its earlier state, such as a video position, is already gone), so the favicon pin shows that it worked.
 - The tab-strip menu item needs a browser version that supports the `tab` context menu; on older versions only the page menu, toolbar icon, and shortcut are available.
 - The tab-strip item's wording cannot change per tab (Chromium has no "menu is opening" event); the favicon badge shows the state.
 - YouTube's player replaces the right-click menu; right-click twice on the video, right-click outside it, or use the shortcut.
-- No favicon badge on browser pages, the Web Store, or PDFs; the browser blocks scripts there.
+- No favicon badge on browser pages or the Web Store; the browser blocks scripts there.
+- PDFs: the browser's PDF viewer sets the tab's icon and title itself, so the pin shows only after the PDF next reloads. The toolbar ON badge shows the state meanwhile.
 - Sites whose security policy forbids `data:` images (for example iana.org) keep their own favicon; the extension adds 📌 to the start of the tab title instead.
 - A background tab the browser has frozen (Edge's sleeping tabs, energy saver) gets its pin when you next switch to it; the protection applies immediately.
 

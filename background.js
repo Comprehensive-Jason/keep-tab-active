@@ -47,6 +47,12 @@ chrome.action.setBadgeBackgroundColor({ color: GREEN });
 // Tabs to protect as soon as they finish loading (see toggle).
 const pendingKeep = new Set();
 
+// Diagnostics: shown in the service worker console (brave://extensions, the
+// "service worker" link on this extension's card). Set to false to silence.
+const DEBUG = false;
+const log = (...args) => DEBUG && console.log("[KTA]", new Date().toISOString().slice(11, 23), ...args);
+const brief = (t) => t && { id: t.id, status: t.status, discarded: t.discarded, frozen: t.frozen, keep: t.autoDiscardable === false, hasUrl: !!t.url, fav: (t.favIconUrl || "").slice(0, 24) };
+
 async function toggle(tab) {
   if (!tab || tab.id === chrome.tabs.TAB_ID_NONE) return;
   const fresh = await chrome.tabs.get(tab.id);
@@ -54,6 +60,7 @@ async function toggle(tab) {
   // Discarded by Memory Saver, or restored at startup but never loaded
   // (status "unloaded" without the discarded flag).
   const unloaded = fresh.discarded || fresh.status === "unloaded";
+  log("toggle", keep ? "ON" : "OFF", brief(fresh));
   try {
     await chrome.tabs.update(tab.id, { autoDiscardable: !keep });
   } catch (e) {
@@ -79,6 +86,7 @@ async function loadTab(tabId) {
   await chrome.tabs.reload(tabId).catch((e) => console.warn("Keep Tab Active: reload failed", e));
   await new Promise((resolve) => setTimeout(resolve, 1500));
   const after = await chrome.tabs.get(tabId).catch(() => null);
+  log("loadTab: 1.5 s after reload", brief(after));
   if (after?.status === "unloaded" && after.url) {
     await chrome.tabs.update(tabId, { url: after.url }).catch((e) => console.warn("Keep Tab Active: load failed", e));
   }
@@ -95,14 +103,18 @@ async function markTab(tabId, pageUrl) {
   const href = pageUrl ? await markedFavicon(pageUrl) : null;
   const run = (useTitle) =>
     chrome.scripting.executeScript({ target: { tabId }, func: setFaviconMark, args: [href, useTitle] });
+  log("markTab", tabId, href ? "pin" : "unpin", href ? `(icon ${href.length} chars)` : "");
   try {
     await run(false);
+    log("markTab: script ran", tabId);
     if (!href) return;
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const tab = await chrome.tabs.get(tabId);
+    log("markTab: 1.5 s later", brief(tab));
     if (tab.autoDiscardable === false && !tab.favIconUrl?.startsWith("data:")) await run(true);
-  } catch {
+  } catch (e) {
     // brave:// pages, the Web Store, and PDFs refuse scripts; closed tabs
+    log("markTab failed", tabId, e?.message);
   }
 }
 
@@ -240,6 +252,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     tab = await chrome.tabs.update(tabId, { autoDiscardable: false });
   }
   reflect(tab);
+  if (changeInfo.status) log("onUpdated", changeInfo.status, brief(tab));
   // A full page load (reload, new site, or a discarded tab coming back)
   // wipes the injected favicon, so put it back on protected tabs. Only
   // possible with the opt-in; without it tab.url is hidden and this skips.
@@ -256,3 +269,4 @@ chrome.permissions.onAdded.addListener(async () => {
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => chrome.tabs.get(tabId).then(reflect));
 chrome.windows.onFocusChanged.addListener(reflectActiveTab);
+chrome.tabs.onReplaced.addListener((added, removed) => log("onReplaced", removed, "->", added));
