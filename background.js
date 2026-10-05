@@ -49,6 +49,12 @@ async function toggle(tab) {
   const fresh = await chrome.tabs.get(tab.id);
   const keep = fresh.autoDiscardable !== false;
   await chrome.tabs.update(tab.id, { autoDiscardable: !keep });
+  // An already-unloaded tab has no page to pin. Protecting it means the user
+  // wants it kept, so load it now; onUpdated pins it when the load completes.
+  if (keep && fresh.discarded) {
+    await chrome.tabs.reload(tab.id).catch(() => {});
+    return;
+  }
   // No URL means no page access (a background tab without the opt-in);
   // the protection still applies, only the favicon pin is skipped.
   if (keep && !fresh.url) return;

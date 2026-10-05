@@ -32,7 +32,7 @@ The protection itself needs none of these; only the favicon pin does. The extens
 
 - Without the optional all-sites access, the favicon pin appears only on the tab you are viewing when you protect it, and a full reload clears it (the tab stays protected; the toolbar badge stays correct).
 - Protection lasts until the tab closes or the browser restarts.
-- A tab that has already been discarded reloads when you open it; protect it before switching away.
+- Protecting a tab that has already been discarded reloads it straight away (its earlier state, such as a video position, is already gone), so the favicon pin shows that it worked.
 - The tab-strip menu item needs a browser version that supports the `tab` context menu; on older versions only the page menu, toolbar icon, and shortcut are available.
 - The tab-strip item's wording cannot change per tab (Chromium has no "menu is opening" event); the favicon badge shows the state.
 - YouTube's player replaces the right-click menu; right-click twice on the video, right-click outside it, or use the shortcut.
